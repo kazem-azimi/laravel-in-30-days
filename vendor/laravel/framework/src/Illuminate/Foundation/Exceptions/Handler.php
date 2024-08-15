@@ -13,11 +13,13 @@ use Illuminate\Console\View\Components\BulletList;
 use Illuminate\Console\View\Components\Error;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Debug\ExceptionHandler as ExceptionHandlerContract;
+use Illuminate\Contracts\Debug\ShouldntReport;
 use Illuminate\Contracts\Foundation\ExceptionRenderer;
 use Illuminate\Contracts\Support\Responsable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\MultipleRecordsFoundException;
 use Illuminate\Database\RecordsNotFoundException;
+use Illuminate\Foundation\Exceptions\Renderer\Renderer;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -38,10 +40,11 @@ use Psr\Log\LogLevel;
 use Symfony\Component\Console\Application as ConsoleApplication;
 use Symfony\Component\Console\Exception\CommandNotFoundException;
 use Symfony\Component\ErrorHandler\ErrorRenderer\HtmlErrorRenderer;
-use Symfony\Component\HttpFoundation\Exception\SuspiciousOperationException;
+use Symfony\Component\HttpFoundation\Exception\RequestExceptionInterface;
 use Symfony\Component\HttpFoundation\RedirectResponse as SymfonyRedirectResponse;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -143,7 +146,7 @@ class Handler implements ExceptionHandlerContract
         ModelNotFoundException::class,
         MultipleRecordsFoundException::class,
         RecordsNotFoundException::class,
-        SuspiciousOperationException::class,
+        RequestExceptionInterface::class,
         TokenMismatchException::class,
         ValidationException::class,
     ];
@@ -276,7 +279,7 @@ class Handler implements ExceptionHandlerContract
     /**
      * Indicate that the given exception type should not be reported.
      *
-     * @param  array|string  $class
+     * @param  array|string  $exceptions
      * @return $this
      */
     public function ignore(array|string $exceptions)
@@ -396,6 +399,10 @@ class Handler implements ExceptionHandlerContract
     protected function shouldntReport(Throwable $e)
     {
         if ($this->withoutDuplicates && ($this->reportedExceptionMap[$e] ?? false)) {
+            return true;
+        }
+
+        if ($e instanceof ShouldntReport) {
             return true;
         }
 
@@ -630,7 +637,7 @@ class Handler implements ExceptionHandlerContract
             ),
             $e instanceof AuthorizationException && ! $e->hasStatus() => new AccessDeniedHttpException($e->getMessage(), $e),
             $e instanceof TokenMismatchException => new HttpException(419, $e->getMessage(), $e),
-            $e instanceof SuspiciousOperationException => new NotFoundHttpException('Bad hostname provided.', $e),
+            $e instanceof RequestExceptionInterface => new BadRequestHttpException('Bad request.', $e),
             $e instanceof RecordsNotFoundException => new NotFoundHttpException('Not found.', $e),
             default => $e,
         };
@@ -830,9 +837,15 @@ class Handler implements ExceptionHandlerContract
     protected function renderExceptionContent(Throwable $e)
     {
         try {
-            return config('app.debug') && app()->has(ExceptionRenderer::class)
-                        ? $this->renderExceptionWithCustomRenderer($e)
-                        : $this->renderExceptionWithSymfony($e, config('app.debug'));
+            if (config('app.debug')) {
+                if (app()->has(ExceptionRenderer::class)) {
+                    return $this->renderExceptionWithCustomRenderer($e);
+                } elseif ($this->container->bound(Renderer::class)) {
+                    return $this->container->make(Renderer::class)->render(request(), $e);
+                }
+            }
+
+            return $this->renderExceptionWithSymfony($e, config('app.debug'));
         } catch (Throwable $e) {
             return $this->renderExceptionWithSymfony($e, config('app.debug'));
         }

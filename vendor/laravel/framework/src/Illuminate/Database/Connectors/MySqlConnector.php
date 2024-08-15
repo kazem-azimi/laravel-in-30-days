@@ -77,11 +77,9 @@ class MySqlConnector extends Connector implements ConnectorInterface
      */
     protected function getHostDsn(array $config)
     {
-        extract($config, EXTR_SKIP);
-
-        return isset($port)
-                    ? "mysql:host={$host};port={$port};dbname={$database}"
-                    : "mysql:host={$host};dbname={$database}";
+        return isset($config['port'])
+                    ? "mysql:host={$config['host']};port={$config['port']};dbname={$config['database']}"
+                    : "mysql:host={$config['host']};dbname={$config['database']}";
     }
 
     /**
@@ -93,11 +91,11 @@ class MySqlConnector extends Connector implements ConnectorInterface
      */
     protected function configureConnection(PDO $connection, array $config)
     {
-        $statements = [];
-
         if (isset($config['isolation_level'])) {
-            $statements[] = sprintf('SESSION TRANSACTION ISOLATION LEVEL %s', $config['isolation_level']);
+            $connection->exec(sprintf('SET SESSION TRANSACTION ISOLATION LEVEL %s;', $config['isolation_level']));
         }
+
+        $statements = [];
 
         if (isset($config['charset'])) {
             if (isset($config['collation'])) {

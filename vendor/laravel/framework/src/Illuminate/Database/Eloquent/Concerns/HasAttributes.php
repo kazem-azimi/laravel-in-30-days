@@ -394,8 +394,8 @@ trait HasAttributes
             // If the relation value has been set, we will set it on this attributes
             // list for returning. If it was not arrayable or null, we'll not set
             // the value on the array because it is some type of invalid value.
-            if (isset($relation) || is_null($value)) {
-                $attributes[$key] = $relation;
+            if (array_key_exists('relation', get_defined_vars())) { // check if $relation is in scope (could be null)
+                $attributes[$key] = $relation ?? null;
             }
 
             unset($relation);
@@ -434,6 +434,25 @@ trait HasAttributes
     }
 
     /**
+     * Determine whether an attribute exists on the model.
+     *
+     * @param  string  $key
+     * @return bool
+     */
+    public function hasAttribute($key)
+    {
+        if (! $key) {
+            return false;
+        }
+
+        return array_key_exists($key, $this->attributes) ||
+            array_key_exists($key, $this->casts) ||
+            $this->hasGetMutator($key) ||
+            $this->hasAttributeMutator($key) ||
+            $this->isClassCastable($key);
+    }
+
+    /**
      * Get an attribute from the model.
      *
      * @param  string  $key
@@ -448,11 +467,7 @@ trait HasAttributes
         // If the attribute exists in the attribute array or has a "get" mutator we will
         // get the attribute's value. Otherwise, we will proceed as if the developers
         // are asking for a relationship's value. This covers both types of values.
-        if (array_key_exists($key, $this->attributes) ||
-            array_key_exists($key, $this->casts) ||
-            $this->hasGetMutator($key) ||
-            $this->hasAttributeMutator($key) ||
-            $this->isClassCastable($key)) {
+        if ($this->hasAttribute($key)) {
             return $this->getAttributeValue($key);
         }
 
@@ -1193,7 +1208,7 @@ trait HasAttributes
      * Set the value of an enum castable attribute.
      *
      * @param  string  $key
-     * @param  \UnitEnum|string|int  $value
+     * @param  \UnitEnum|string|int|null  $value
      * @return void
      */
     protected function setEnumCastableAttribute($key, $value)
@@ -1311,7 +1326,7 @@ trait HasAttributes
     /**
      * Decode the given JSON back into an array or object.
      *
-     * @param  string  $value
+     * @param  string|null  $value
      * @param  bool  $asObject
      * @return mixed
      */
@@ -1338,7 +1353,7 @@ trait HasAttributes
      * @param  mixed  $value
      * @return string
      */
-    protected function castAttributeAsEncryptedString($key, $value)
+    protected function castAttributeAsEncryptedString($key, #[\SensitiveParameter] $value)
     {
         return static::currentEncrypter()->encrypt($value, false);
     }
@@ -1371,7 +1386,7 @@ trait HasAttributes
      * @param  mixed  $value
      * @return string
      */
-    protected function castAttributeAsHashedString($key, $value)
+    protected function castAttributeAsHashedString($key, #[\SensitiveParameter] $value)
     {
         if ($value === null) {
             return null;
@@ -1381,6 +1396,7 @@ trait HasAttributes
             return Hash::make($value);
         }
 
+        /** @phpstan-ignore-next-line */
         if (! Hash::verifyConfiguration($value)) {
             throw new RuntimeException("Could not verify the hashed value's configuration.");
         }
@@ -1459,7 +1475,7 @@ trait HasAttributes
         // and format a Carbon object from this timestamp. This allows flexibility
         // when defining your date fields as they might be UNIX timestamps here.
         if (is_numeric($value)) {
-            return Date::createFromTimestamp($value);
+            return Date::createFromTimestamp($value, date_default_timezone_get());
         }
 
         // If the value is in simply year, month, day format, we will instantiate the
